@@ -11,6 +11,10 @@ def compute_spectrum(
     """
     Compute a centered FFT power spectrum from complex IQ samples.
 
+    The FFT is calculated for one IQ block. Power is NOT normalized
+    independently for each block, so power measurements can be
+    compared across time.
+
     Args:
         samples:
             Complex I/Q samples for one block.
@@ -30,14 +34,13 @@ def compute_spectrum(
             Timestamp of the IQ block.
 
         frequencies_hz:
-            Frequency corresponding to each FFT bin.
+            RF frequency corresponding to each FFT bin.
 
         power:
             Raw FFT power for each frequency bin.
 
         power_db:
-            Relative power in dB, with the strongest bin
-            normalized to 0 dB.
+            Power expressed in dB relative to the FFT reference.
     """
 
     n = len(samples)
@@ -50,30 +53,37 @@ def compute_spectrum(
     windowed = samples * window
 
     # Compute FFT and shift zero frequency to the center.
-    fft = np.fft.fftshift(np.fft.fft(windowed))
+    fft = np.fft.fftshift(
+        np.fft.fft(windowed)
+    )
 
-    # Calculate frequency of each FFT bin.
+    # Calculate frequency offset of each FFT bin.
     frequencies = np.fft.fftshift(
-        np.fft.fftfreq(n, d=1.0 / sample_rate_hz)
+        np.fft.fftfreq(
+            n,
+            d=1.0 / sample_rate_hz
+        )
     )
 
     # Calculate FFT power.
     power = np.abs(fft) ** 2
 
-    # Convert relative frequencies to actual RF frequencies.
+    # Convert frequency offsets to actual RF frequencies.
     frequencies_hz = center_frequency_hz + frequencies
 
-    # Convert to relative dB.
-    # The strongest FFT bin is defined as 0 dB.
-    max_power = np.max(power)
+    # ---------------------------------------------------------
+    # Convert power to dB WITHOUT normalizing each block
+    # to its own maximum.
+    # ---------------------------------------------------------
 
-    if max_power > 0:
-        power_db = 10.0 * np.log10(power / max_power)
-    else:
-        power_db = np.full_like(
-            power,
-            -np.inf,
-            dtype=np.float64,
-        )
+    # Prevent log10(0).
+    power_db = 10.0 * np.log10(
+        np.maximum(power, 1e-20)
+    )
 
-    return timestamp, frequencies_hz, power, power_db
+    return (
+        timestamp,
+        frequencies_hz,
+        power,
+        power_db,
+    )
