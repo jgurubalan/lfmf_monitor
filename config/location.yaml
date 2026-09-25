@@ -12,3 +12,17 @@ location:
 
   timezone: "Asia/Kolkata"
   coordinate_system: "WGS84"
+
+rf:
+  center_frequency_hz: 1000000
+  sample_rate_hz: 2400000
+  gain: "auto"
+
+  fft_size: 4096
+  fft_averages: 4
+
+recording:
+  iq_enabled: true
+  spectrum_enabled: true
+  iq_duration_seconds: 10
+  spectrum_interval_seconds: 5

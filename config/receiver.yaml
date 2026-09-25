@@ -1,0 +1,8 @@
+receiver:
+  device: 0
+
+  center_frequency_hz: 1000000
+
+  sample_rate_hz: 2400000
+
+  gain: "auto"
