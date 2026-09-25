@@ -1,10 +1,19 @@
 receiver:
   device: 0
 
-  center_frequency_hz: 500000
+  center_frequency_hz: 106000000
 
   sample_rate_hz: 2400000
 
   block_size: 24000
 
   gain: "auto"
+
+signal_detection:
+  min_snr_db: 45
+  min_peak_power_db: 100
+
+transport:
+  enabled: true
+  server_url: "http://YOUR_VPS_IP:8000/detection"
+  timeout_seconds: 10

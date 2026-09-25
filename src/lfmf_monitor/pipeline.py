@@ -1,11 +1,13 @@
 from lfmf_monitor.receiver import RTLSDR
 from lfmf_monitor.spectrum import compute_spectrum
+from lfmf_monitor.buffer import SignalBuffer
 
 
 def run():
-    """Run the receiver and spectrum-processing pipeline."""
+    """Run the receiver, spectrum-processing, and detection pipeline."""
 
     receiver = RTLSDR()
+    buffer = SignalBuffer()
 
     try:
         receiver.start()
@@ -22,6 +24,14 @@ def run():
         print(
             f"Block size: "
             f"{receiver.block_size} samples"
+        )
+        print(
+            f"Minimum SNR: "
+            f"{buffer.min_snr_db:.2f} dB"
+        )
+        print(
+            f"Minimum Peak Power: "
+            f"{buffer.min_peak_power_db:.2f} dB"
         )
         print()
 
@@ -45,36 +55,44 @@ def run():
             )
 
             # -------------------------------------------------
-            # 3. Extract spectrum measurements
-            # -------------------------------------------------
-
-            timestamp = result["timestamp"]
-
-            frequencies_hz = result["frequencies_hz"]
-            power = result["power"]
-            power_db = result["power_db"]
-
-            noise_floor_db = result["noise_floor_db"]
-
-            peak_frequency_hz = result["peak_frequency_hz"]
-            peak_power = result["peak_power"]
-            peak_power_db = result["peak_power_db"]
-
-            signal_above_noise_db = result[
-                "signal_above_noise_db"
-            ]
-
-            # -------------------------------------------------
-            # 4. Display the measurements
+            # 3. Display the spectrum measurements
             # -------------------------------------------------
 
             print(
-                f"{timestamp.isoformat()} | "
-                f"Peak: {peak_frequency_hz / 1e6:.6f} MHz | "
-                f"Peak Power: {peak_power_db:.2f} dB | "
-                f"Noise Floor: {noise_floor_db:.2f} dB | "
-                f"SNR: {signal_above_noise_db:.2f} dB"
+                f"{result['timestamp'].isoformat()} | "
+                f"Peak: "
+                f"{result['peak_frequency_hz'] / 1e6:.6f} MHz | "
+                f"Peak Power: "
+                f"{result['peak_power_db']:.2f} dB | "
+                f"Noise Floor: "
+                f"{result['noise_floor_db']:.2f} dB | "
+                f"SNR: "
+                f"{result['signal_above_noise_db']:.2f} dB"
             )
+
+            # -------------------------------------------------
+            # 4. Send spectrum result to buffer
+            # -------------------------------------------------
+
+            stored = buffer.store(
+                {
+                    "timestamp": result["timestamp"].isoformat(),
+                    "peak_frequency_hz": result["peak_frequency_hz"],
+                    "peak_power_db": result["peak_power_db"],
+                    "noise_floor_db": result["noise_floor_db"],
+                    "snr_db": result["signal_above_noise_db"],
+                }
+            )
+
+            # -------------------------------------------------
+            # 5. Report significant detections
+            # -------------------------------------------------
+
+            if stored:
+                print(
+                    ">>> Significant signal detected "
+                    "and stored in database."
+                )
 
     except KeyboardInterrupt:
         print("\nStopping...")
