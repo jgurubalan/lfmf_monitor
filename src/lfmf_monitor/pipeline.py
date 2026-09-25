@@ -27,32 +27,53 @@ def run():
 
         while True:
 
-            # Get one block of IQ samples
+            # -------------------------------------------------
+            # 1. Get one block of IQ samples
+            # -------------------------------------------------
+
             timestamp, samples = receiver.read_samples()
 
-            # Convert IQ samples into a frequency spectrum
-            (
-                timestamp,
-                frequencies_hz,
-                power,
-                power_db,
-            ) = compute_spectrum(
+            # -------------------------------------------------
+            # 2. Calculate the complete spectrum
+            # -------------------------------------------------
+
+            result = compute_spectrum(
                 samples=samples,
                 sample_rate_hz=receiver.sample_rate_hz,
                 center_frequency_hz=receiver.center_frequency_hz,
                 timestamp=timestamp,
             )
 
-            # Find strongest frequency in this spectrum
-            peak_index = power.argmax()
+            # -------------------------------------------------
+            # 3. Extract spectrum measurements
+            # -------------------------------------------------
 
-            peak_frequency_hz = frequencies_hz[peak_index]
-            peak_power_db = power_db[peak_index]
+            timestamp = result["timestamp"]
+
+            frequencies_hz = result["frequencies_hz"]
+            power = result["power"]
+            power_db = result["power_db"]
+
+            noise_floor_db = result["noise_floor_db"]
+
+            peak_frequency_hz = result["peak_frequency_hz"]
+            peak_power = result["peak_power"]
+            peak_power_db = result["peak_power_db"]
+
+            signal_above_noise_db = result[
+                "signal_above_noise_db"
+            ]
+
+            # -------------------------------------------------
+            # 4. Display the measurements
+            # -------------------------------------------------
 
             print(
                 f"{timestamp.isoformat()} | "
                 f"Peak: {peak_frequency_hz / 1e6:.6f} MHz | "
-                f"Power: {peak_power_db:.2f} dB"
+                f"Peak Power: {peak_power_db:.2f} dB | "
+                f"Noise Floor: {noise_floor_db:.2f} dB | "
+                f"SNR: {signal_above_noise_db:.2f} dB"
             )
 
     except KeyboardInterrupt:

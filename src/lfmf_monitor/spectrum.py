@@ -9,11 +9,17 @@ def compute_spectrum(
     timestamp: datetime,
 ):
     """
-    Compute a centered FFT power spectrum from complex IQ samples.
+    Compute FFT spectrum and signal measurements for one IQ block.
 
-    The FFT is calculated for one IQ block. Power is NOT normalized
-    independently for each block, so power measurements can be
-    compared across time.
+    For each block this function calculates:
+
+        - Frequency of every FFT bin
+        - Raw FFT power
+        - Power in dB
+        - Estimated noise floor
+        - Peak frequency
+        - Peak power
+        - Signal level above the noise floor (SNR)
 
     Args:
         samples:
@@ -26,21 +32,10 @@ def compute_spectrum(
             RTL-SDR center frequency in Hz.
 
         timestamp:
-            UTC timestamp associated with the beginning of
-            the IQ block.
+            UTC timestamp associated with the IQ block.
 
     Returns:
-        timestamp:
-            Timestamp of the IQ block.
-
-        frequencies_hz:
-            RF frequency corresponding to each FFT bin.
-
-        power:
-            Raw FFT power for each frequency bin.
-
-        power_db:
-            Power expressed in dB relative to the FFT reference.
+        Dictionary containing all spectrum measurements.
     """
 
     n = len(samples)
@@ -48,42 +43,106 @@ def compute_spectrum(
     if n == 0:
         raise ValueError("No IQ samples supplied")
 
-    # Apply Hann window to reduce spectral leakage.
+    # ---------------------------------------------------------
+    # 1. Apply Hann window
+    # ---------------------------------------------------------
+
     window = np.hanning(n)
     windowed = samples * window
 
-    # Compute FFT and shift zero frequency to the center.
+    # ---------------------------------------------------------
+    # 2. FFT
+    # ---------------------------------------------------------
+
     fft = np.fft.fftshift(
         np.fft.fft(windowed)
     )
 
-    # Calculate frequency offset of each FFT bin.
-    frequencies = np.fft.fftshift(
+    # ---------------------------------------------------------
+    # 3. Frequency corresponding to every FFT bin
+    # ---------------------------------------------------------
+
+    frequency_offsets = np.fft.fftshift(
         np.fft.fftfreq(
             n,
             d=1.0 / sample_rate_hz
         )
     )
 
-    # Calculate FFT power.
+    frequencies_hz = (
+        center_frequency_hz
+        + frequency_offsets
+    )
+
+    # ---------------------------------------------------------
+    # 4. Calculate raw FFT power
+    # ---------------------------------------------------------
+
     power = np.abs(fft) ** 2
 
-    # Convert frequency offsets to actual RF frequencies.
-    frequencies_hz = center_frequency_hz + frequencies
-
     # ---------------------------------------------------------
-    # Convert power to dB WITHOUT normalizing each block
-    # to its own maximum.
+    # 5. Convert power to dB
+    #
+    # IMPORTANT:
+    # We do NOT normalize each block to 0 dB.
+    # Therefore measurements can be compared between blocks.
     # ---------------------------------------------------------
 
-    # Prevent log10(0).
     power_db = 10.0 * np.log10(
         np.maximum(power, 1e-20)
     )
 
-    return (
-        timestamp,
-        frequencies_hz,
-        power,
-        power_db,
+    # ---------------------------------------------------------
+    # 6. Estimate noise floor
+    #
+    # Median is used because strong signals should not
+    # strongly influence the noise estimate.
+    # ---------------------------------------------------------
+
+    noise_floor_db = np.median(power_db)
+
+    # ---------------------------------------------------------
+    # 7. Find strongest FFT bin
+    # ---------------------------------------------------------
+
+    peak_index = np.argmax(power)
+
+    peak_frequency_hz = frequencies_hz[peak_index]
+
+    peak_power = power[peak_index]
+
+    peak_power_db = power_db[peak_index]
+
+    # ---------------------------------------------------------
+    # 8. Calculate signal above noise floor
+    #
+    # This is effectively the peak SNR for the block.
+    # ---------------------------------------------------------
+
+    signal_above_noise_db = (
+        peak_power_db - noise_floor_db
     )
+
+    # ---------------------------------------------------------
+    # 9. Return everything
+    # ---------------------------------------------------------
+
+    return {
+        "timestamp": timestamp,
+
+        # Complete spectrum
+        "frequencies_hz": frequencies_hz,
+        "power": power,
+        "power_db": power_db,
+
+        # Noise measurement
+        "noise_floor_db": noise_floor_db,
+
+        # Peak measurement
+        "peak_frequency_hz": peak_frequency_hz,
+        "peak_power": peak_power,
+        "peak_power_db": peak_power_db,
+
+        # Signal relative to noise
+        "signal_above_noise_db": signal_above_noise_db,
+    }
