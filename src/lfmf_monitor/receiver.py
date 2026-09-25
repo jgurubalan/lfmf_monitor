@@ -1,4 +1,5 @@
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ class RTLSDR:
         self,
         center_frequency_hz: int | None = None,
         sample_rate_hz: int | None = None,
+        block_size: int | None = None,
         gain: str | None = None,
         device: int | None = None,
     ):
@@ -22,7 +24,7 @@ class RTLSDR:
         # │   └── receiver.yaml
         # └── src/
         #     └── lfmf_monitor/
-        #         └── rtl.py
+        #         └── receiver.py
         #
         project_root = Path(__file__).resolve().parents[2]
         config_path = project_root / "config" / "receiver.yaml"
@@ -52,6 +54,12 @@ class RTLSDR:
             else receiver_config["sample_rate_hz"]
         )
 
+        self.block_size = (
+            block_size
+            if block_size is not None
+            else receiver_config["block_size"]
+        )
+
         self.gain = (
             gain
             if gain is not None
@@ -63,6 +71,12 @@ class RTLSDR:
             if device is not None
             else receiver_config.get("device", 0)
         )
+
+        if self.block_size <= 0:
+            raise ValueError("block_size must be greater than zero")
+
+        if self.sample_rate_hz <= 0:
+            raise ValueError("sample_rate_hz must be greater than zero")
 
         self.process = None
 
@@ -104,14 +118,37 @@ class RTLSDR:
                 "Make sure the rtl-sdr package is installed."
             ) from exc
 
-    def read_samples(self, num_samples: int) -> np.ndarray:
-        """Read num_samples complex I/Q samples."""
+    def read_samples(
+        self,
+        num_samples: int | None = None,
+    ) -> tuple[datetime, np.ndarray]:
+        """
+        Read one block of complex I/Q samples.
+
+        Returns:
+            timestamp:
+                UTC timestamp representing the beginning of the
+                block read operation.
+
+            samples:
+                Complex I/Q samples.
+        """
 
         if self.process is None or self.process.stdout is None:
             raise RuntimeError("RTL-SDR is not running")
 
+        # Use configured block size unless explicitly overridden.
+        if num_samples is None:
+            num_samples = self.block_size
+
         if num_samples <= 0:
             raise ValueError("num_samples must be greater than zero")
+
+        # Record the timestamp before reading the block.
+        #
+        # This timestamp represents the beginning of the block
+        # acquisition from the Python application's perspective.
+        timestamp = datetime.now(timezone.utc)
 
         # Each RTL-SDR sample contains:
         #
@@ -120,13 +157,18 @@ class RTLSDR:
         # Therefore there are 2 bytes per complex sample.
         num_bytes = num_samples * 2
 
-        raw = self.process.stdout.read(num_bytes)
+        raw = bytearray()
 
-        if len(raw) != num_bytes:
-            raise RuntimeError(
-                f"RTL-SDR stream ended early: "
-                f"received {len(raw)} of {num_bytes} bytes"
-            )
+        while len(raw) < num_bytes:
+            chunk = self.process.stdout.read(num_bytes - len(raw))
+
+            if not chunk:
+                raise RuntimeError(
+                    f"RTL-SDR stream ended early: "
+                    f"received {len(raw)} of {num_bytes} bytes"
+                )
+
+            raw.extend(chunk)
 
         # Convert raw bytes into unsigned 8-bit values.
         iq = np.frombuffer(raw, dtype=np.uint8)
@@ -136,7 +178,9 @@ class RTLSDR:
         q = iq[1::2].astype(np.float32) - 127.5
 
         # Combine I and Q into complex samples.
-        return (i + 1j * q).astype(np.complex64)
+        samples = (i + 1j * q).astype(np.complex64)
+
+        return timestamp, samples
 
     def stop(self) -> None:
         """Stop rtl_sdr and release the RTL-SDR device."""
