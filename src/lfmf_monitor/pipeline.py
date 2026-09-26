@@ -1,13 +1,15 @@
 from lfmf_monitor.receiver import RTLSDR
 from lfmf_monitor.spectrum import compute_spectrum
 from lfmf_monitor.buffer import SignalBuffer
+from lfmf_monitor.transport import Transport
 
 
 def run():
-    """Run the receiver, spectrum-processing, and detection pipeline."""
+    """Run the receiver, spectrum-processing, detection, and transport pipeline."""
 
     receiver = RTLSDR()
     buffer = SignalBuffer()
+    transport = Transport()
 
     try:
         receiver.start()
@@ -32,6 +34,10 @@ def run():
         print(
             f"Minimum Peak Power: "
             f"{buffer.min_peak_power_db:.2f} dB"
+        )
+        print(
+            f"Transport: "
+            f"{'enabled' if transport.enabled else 'disabled'}"
         )
         print()
 
@@ -85,13 +91,24 @@ def run():
             )
 
             # -------------------------------------------------
-            # 5. Report significant detections
+            # 5. Send only significant detections to VPS
             # -------------------------------------------------
 
             if stored:
                 print(
                     ">>> Significant signal detected "
                     "and stored in database."
+                )
+
+                response = transport.send(
+                    {
+                        "type": "EVENT",
+                        **stored,
+                    }
+                )
+
+                print(
+                    f">>> VPS response: {response}"
                 )
 
     except KeyboardInterrupt:
