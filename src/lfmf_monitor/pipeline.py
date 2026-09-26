@@ -2,6 +2,7 @@ from lfmf_monitor.receiver import RTLSDR
 from lfmf_monitor.spectrum import compute_spectrum
 from lfmf_monitor.buffer import SignalBuffer
 from lfmf_monitor.transport import Transport
+from lfmf_monitor.watchdog import Watchdog
 
 
 def run():
@@ -10,9 +11,15 @@ def run():
     receiver = RTLSDR()
     buffer = SignalBuffer()
     transport = Transport()
+    watchdog = Watchdog()
 
     try:
         receiver.start()
+
+        watchdog.info(
+            "pipeline",
+            "Monitoring started.",
+        )
 
         print("Monitoring started.")
         print(
@@ -116,6 +123,12 @@ def run():
 
     finally:
         receiver.stop()
+
+        watchdog.info(
+            "pipeline",
+            "Monitoring stopped.",
+        )
+
         print("RTL-SDR stopped.")
 
 

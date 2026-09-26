@@ -3,40 +3,48 @@ import subprocess
 
 
 class LogBackup:
-    """Back up the watchdog log to the VPS."""
+    """Back up the watchdog log to the LFMF Monitor VPS."""
 
     def __init__(
         self,
         log_path: str = "data/logs/watchdog.log",
-        vps_host: str = "169.58.129.177",
-        vps_user: str = "jgurubalan",
-        vps_path: str = "~/projects/lfmf_monitoring/data/backups/watchdog/",
+        ssh_alias: str = "lfmf-monitor-vps",
+        remote_path: str = (
+            "/home/jgurubalan/"
+            "projects/lfmf_monitoring/"
+            "data/backups/watchdog"
+        ),
     ):
         self.log_path = Path(log_path)
-        self.vps_host = vps_host
-        self.vps_user = vps_user
-        self.vps_path = vps_path
+        self.ssh_alias = ssh_alias
+        self.remote_path = remote_path
 
     def backup(self):
-        """Copy the current watchdog log to the VPS."""
+        """Copy the watchdog log to the VPS."""
 
         if not self.log_path.exists():
             print(">>> Watchdog log does not exist.")
             return False
 
-        destination = (
-            f"{self.vps_user}@{self.vps_host}:{self.vps_path}"
-        )
-
-        command = [
-            "scp",
-            str(self.log_path),
-            destination,
-        ]
-
         try:
+            # Make sure the remote directory exists.
             subprocess.run(
-                command,
+                [
+                    "ssh",
+                    self.ssh_alias,
+                    f"mkdir -p '{self.remote_path}'",
+                ],
+                check=True,
+                timeout=30,
+            )
+
+            # Copy the watchdog log.
+            subprocess.run(
+                [
+                    "scp",
+                    str(self.log_path),
+                    f"{self.ssh_alias}:{self.remote_path}/",
+                ],
                 check=True,
                 timeout=60,
             )

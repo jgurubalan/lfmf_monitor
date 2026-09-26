@@ -14,6 +14,9 @@ class Watchdog:
         self.database_path = Path(database_path)
         self.log_path = Path(log_path)
 
+        # Track VPS connectivity state.
+        self.vps_online = None
+
         self._initialize_database()
         self._initialize_log_directory()
 
@@ -132,4 +135,33 @@ class Watchdog:
             level="ALERT",
             component=component,
             message=message,
+        )
+
+    def vps_offline(self, message: str):
+        """Record that the VPS connection is unavailable."""
+
+        # Do not repeatedly log the same offline condition.
+        if self.vps_online is False:
+            return None
+
+        self.vps_online = False
+
+        return self.warning(
+            "transport",
+            message,
+        )
+
+    def vps_restored(self):
+        """Record that the VPS connection has been restored."""
+
+        # Only log restoration if we previously knew the VPS was offline.
+        if self.vps_online is not False:
+            self.vps_online = True
+            return None
+
+        self.vps_online = True
+
+        return self.info(
+            "transport",
+            "VPS connection restored.",
         )
