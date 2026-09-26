@@ -1,3 +1,5 @@
+import time
+
 from lfmf_monitor.receiver import RTLSDR
 from lfmf_monitor.spectrum import compute_spectrum
 from lfmf_monitor.buffer import SignalBuffer
@@ -5,13 +7,21 @@ from lfmf_monitor.transport import Transport
 from lfmf_monitor.watchdog import Watchdog
 
 
+VPS_CHECK_INTERVAL_SECONDS = 60
+
+
 def run():
     """Run the receiver, spectrum-processing, detection, and transport pipeline."""
 
     receiver = RTLSDR()
     buffer = SignalBuffer()
-    transport = Transport()
+
     watchdog = Watchdog()
+    transport = Transport(
+        watchdog=watchdog,
+    )
+
+    last_vps_check = 0.0
 
     try:
         receiver.start()
@@ -45,6 +55,10 @@ def run():
         print(
             f"Transport: "
             f"{'enabled' if transport.enabled else 'disabled'}"
+        )
+        print(
+            f"VPS health check: "
+            f"every {VPS_CHECK_INTERVAL_SECONDS} seconds"
         )
         print()
 
@@ -90,10 +104,18 @@ def run():
             stored = buffer.store(
                 {
                     "timestamp": result["timestamp"].isoformat(),
-                    "peak_frequency_hz": result["peak_frequency_hz"],
-                    "peak_power_db": result["peak_power_db"],
-                    "noise_floor_db": result["noise_floor_db"],
-                    "snr_db": result["signal_above_noise_db"],
+                    "peak_frequency_hz": result[
+                        "peak_frequency_hz"
+                    ],
+                    "peak_power_db": result[
+                        "peak_power_db"
+                    ],
+                    "noise_floor_db": result[
+                        "noise_floor_db"
+                    ],
+                    "snr_db": result[
+                        "signal_above_noise_db"
+                    ],
                 }
             )
 
@@ -117,6 +139,23 @@ def run():
                 print(
                     f">>> VPS response: {response}"
                 )
+
+            # -------------------------------------------------
+            # 6. Periodically check VPS connection
+            # -------------------------------------------------
+
+            current_time = time.monotonic()
+
+            if (
+                transport.enabled
+                and (
+                    current_time - last_vps_check
+                    >= VPS_CHECK_INTERVAL_SECONDS
+                )
+            ):
+                transport.check_connection()
+
+                last_vps_check = current_time
 
     except KeyboardInterrupt:
         print("\nStopping...")

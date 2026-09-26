@@ -14,7 +14,11 @@ class Watchdog:
         self.database_path = Path(database_path)
         self.log_path = Path(log_path)
 
-        # Track VPS connectivity state.
+        # VPS connection state:
+        #
+        # None  = connection status not known yet
+        # True  = VPS is online
+        # False = VPS is offline
         self.vps_online = None
 
         self._initialize_database()
@@ -61,7 +65,7 @@ class Watchdog:
 
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Save to SQLite.
+        # Save event to SQLite.
         with sqlite3.connect(self.database_path) as connection:
             cursor = connection.execute(
                 """
@@ -85,7 +89,7 @@ class Watchdog:
 
             event_id = cursor.lastrowid
 
-        # Save to text log.
+        # Save event to text log.
         log_entry = (
             f"{timestamp} | "
             f"{level} | "
@@ -93,7 +97,10 @@ class Watchdog:
             f"{message}\n"
         )
 
-        with self.log_path.open("a", encoding="utf-8") as file:
+        with self.log_path.open(
+            "a",
+            encoding="utf-8",
+        ) as file:
             file.write(log_entry)
 
         return event_id
@@ -154,11 +161,20 @@ class Watchdog:
     def vps_restored(self):
         """Record that the VPS connection has been restored."""
 
-        # Only log restoration if we previously knew the VPS was offline.
-        if self.vps_online is not False:
+        # First successful connection.
+        if self.vps_online is None:
             self.vps_online = True
+
+            return self.info(
+                "transport",
+                "VPS connection established.",
+            )
+
+        # Already known to be online.
+        if self.vps_online is True:
             return None
 
+        # Previously offline and now working again.
         self.vps_online = True
 
         return self.info(
