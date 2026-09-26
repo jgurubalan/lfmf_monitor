@@ -42,13 +42,30 @@ class Transport:
 
         message = json.dumps(result) + "\n"
 
-        with socket.create_connection(
-            (self.host, self.port),
-            timeout=self.timeout_seconds,
-        ) as connection:
+        try:
+            with socket.create_connection(
+                (self.host, self.port),
+                timeout=self.timeout_seconds,
+            ) as connection:
 
-            connection.sendall(message.encode("utf-8"))
+                connection.sendall(message.encode("utf-8"))
 
-            response = connection.recv(4096)
+                response = connection.recv(4096)
 
-        return response.decode("utf-8").strip()
+            return response.decode("utf-8").strip()
+
+        except ConnectionResetError:
+            print(">>> VPS connection was closed before a response was received.")
+            return None
+
+        except ConnectionRefusedError:
+            print(">>> VPS connection refused. Server may be stopped.")
+            return None
+
+        except socket.timeout:
+            print(">>> VPS connection timed out.")
+            return None
+
+        except OSError as exc:
+            print(f">>> VPS connection error: {exc}")
+            return None

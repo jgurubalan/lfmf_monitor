@@ -1,0 +1,28 @@
+notifications:
+
+  email:
+    enabled: true
+
+    smtp:
+      host: "smtp.gmail.com"
+      port: 587
+      use_tls: true
+
+    from_address: "J.Gurubalan@gmail.com"
+    to_addresses:
+      - "J.Gurubalan@icloud.com"
+
+    # Do not put the SMTP password here.
+    # Store it separately as a secret.
+
+  telegram:
+    enabled: false
+
+    bot:
+      # Telegram Bot API token.
+      # Do not put the real token in this file.
+      token: ""
+
+    chat_id: ""
+
+    # Do not put sensitive credentials in this YAML.
