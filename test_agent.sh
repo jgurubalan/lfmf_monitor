@@ -3,6 +3,7 @@
 PIPELINE_PID_FILE="data/logs/pipeline.pid"
 WATCHDOG_PID_FILE="data/logs/watchdog.pid"
 BACKUP_PID_FILE="data/logs/log_backup.pid"
+TELEMETRY_PID_FILE="data/logs/telemetry.pid"
 
 
 start_pipeline() {
@@ -36,7 +37,6 @@ start_pipeline() {
         disown
 
         echo "Pipeline started (PID $PIPELINE_PID)."
-
     fi
 }
 
@@ -107,6 +107,39 @@ start_backup() {
 }
 
 
+start_telemetry() {
+
+    # ---------------------------------------------------------
+    # Check whether telemetry process is already running
+    # ---------------------------------------------------------
+
+    if [ -f "$TELEMETRY_PID_FILE" ]; then
+        TELEMETRY_PID=$(cat "$TELEMETRY_PID_FILE")
+
+        if kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+            echo "Telemetry is already running (PID $TELEMETRY_PID)."
+            return
+        fi
+
+        rm -f "$TELEMETRY_PID_FILE"
+    fi
+
+    echo "Starting LFMF station telemetry..."
+
+    PYTHONPATH=src python -m lfmf_monitor.telemetry \
+        > /dev/null \
+        2>> data/logs/errors.log &
+
+    TELEMETRY_PID=$!
+
+    echo "$TELEMETRY_PID" > "$TELEMETRY_PID_FILE"
+
+    disown
+
+    echo "Telemetry started (PID $TELEMETRY_PID)."
+}
+
+
 start_all() {
 
     # ---------------------------------------------------------
@@ -116,12 +149,13 @@ start_all() {
     mkdir -p data/logs
 
     # ---------------------------------------------------------
-    # Start all three independent processes
+    # Start all four independent processes
     # ---------------------------------------------------------
 
     start_pipeline
     start_watchdog
     start_backup
+    start_telemetry
 
     echo
     echo "LFMF monitoring system started."
@@ -165,9 +199,6 @@ stop_pipeline() {
     #
     # The watchdog is stopped only when the user explicitly
     # runs ./lfmf.sh stop.
-    #
-    # If the pipeline crashes by itself, this section is never
-    # executed, so the watchdog remains running.
     # ---------------------------------------------------------
 
     if [ -f "$WATCHDOG_PID_FILE" ]; then
@@ -220,6 +251,34 @@ stop_pipeline() {
 
         rm -f "$BACKUP_PID_FILE"
     fi
+
+
+    # ---------------------------------------------------------
+    # Stop telemetry process
+    # ---------------------------------------------------------
+
+    if [ -f "$TELEMETRY_PID_FILE" ]; then
+        TELEMETRY_PID=$(cat "$TELEMETRY_PID_FILE")
+
+        if kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+            echo "Stopping LFMF station telemetry (PID $TELEMETRY_PID)..."
+
+            kill "$TELEMETRY_PID"
+
+            sleep 1
+
+            if kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+                echo "Telemetry did not stop. Force stopping..."
+                kill -9 "$TELEMETRY_PID"
+            fi
+
+            echo "Telemetry stopped."
+        else
+            echo "Telemetry process is no longer running."
+        fi
+
+        rm -f "$TELEMETRY_PID_FILE"
+    fi
 }
 
 
@@ -238,12 +297,12 @@ status_pipeline() {
         PID=$(cat "$PIPELINE_PID_FILE")
 
         if kill -0 "$PID" 2>/dev/null; then
-            echo "Pipeline : RUNNING (PID $PID)."
+            echo "Pipeline  : RUNNING (PID $PID)."
         else
-            echo "Pipeline : NOT RUNNING."
+            echo "Pipeline  : NOT RUNNING."
         fi
     else
-        echo "Pipeline : NOT RUNNING."
+        echo "Pipeline  : NOT RUNNING."
     fi
 
 
@@ -255,12 +314,12 @@ status_pipeline() {
         WATCHDOG_PID=$(cat "$WATCHDOG_PID_FILE")
 
         if kill -0 "$WATCHDOG_PID" 2>/dev/null; then
-            echo "Watchdog : RUNNING (PID $WATCHDOG_PID)."
+            echo "Watchdog  : RUNNING (PID $WATCHDOG_PID)."
         else
-            echo "Watchdog : NOT RUNNING."
+            echo "Watchdog  : NOT RUNNING."
         fi
     else
-        echo "Watchdog : NOT RUNNING."
+        echo "Watchdog  : NOT RUNNING."
     fi
 
 
@@ -272,12 +331,29 @@ status_pipeline() {
         BACKUP_PID=$(cat "$BACKUP_PID_FILE")
 
         if kill -0 "$BACKUP_PID" 2>/dev/null; then
-            echo "Log backup : RUNNING (PID $BACKUP_PID)."
+            echo "Log backup: RUNNING (PID $BACKUP_PID)."
         else
-            echo "Log backup : NOT RUNNING."
+            echo "Log backup: NOT RUNNING."
         fi
     else
-        echo "Log backup : NOT RUNNING."
+        echo "Log backup: NOT RUNNING."
+    fi
+
+
+    # ---------------------------------------------------------
+    # Telemetry status
+    # ---------------------------------------------------------
+
+    if [ -f "$TELEMETRY_PID_FILE" ]; then
+        TELEMETRY_PID=$(cat "$TELEMETRY_PID_FILE")
+
+        if kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+            echo "Telemetry : RUNNING (PID $TELEMETRY_PID)."
+        else
+            echo "Telemetry : NOT RUNNING."
+        fi
+    else
+        echo "Telemetry : NOT RUNNING."
     fi
 
 
