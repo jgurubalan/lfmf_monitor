@@ -11,13 +11,14 @@ set -e
 #
 # It will:
 #   1. Check required SSH tools
-#   2. Ask for VPS information
-#   3. Create a dedicated SSH key
-#   4. Install the public key on the VPS
-#   5. Configure ~/.ssh/config
-#   6. Create the remote backup directory
-#   7. Test passwordless SSH
-#   8. Test an actual file transfer
+#   2. Read station_id from receiver.yaml
+#   3. Ask for VPS information
+#   4. Create a dedicated SSH key
+#   5. Install the public key on the VPS
+#   6. Configure ~/.ssh/config
+#   7. Create the remote station backup directory
+#   8. Test passwordless SSH
+#   9. Test an actual file transfer
 #
 # The private key NEVER leaves the Raspberry Pi.
 # ============================================================
@@ -40,7 +41,7 @@ echo "        v"
 echo "    LFMF Monitor VPS"
 echo "        |"
 echo "        v"
-echo "    watchdog backup directory"
+echo "    watchdog/<station_id> backup directory"
 echo
 echo "A dedicated SSH key will be created:"
 echo
@@ -58,22 +59,81 @@ read -rp "Press Enter to continue, or Ctrl-C to cancel..."
 
 echo
 echo "------------------------------------------------------------"
-echo "STEP 1 - Checking required SSH programs"
+echo "STEP 1 - Checking required programs"
 echo "------------------------------------------------------------"
 echo
 
-for command in ssh ssh-keygen ssh-copy-id scp; do
+for command in ssh ssh-keygen ssh-copy-id scp python3; do
 
     if command -v "$command" >/dev/null 2>&1; then
         echo "OK: $command"
     else
         echo "ERROR: '$command' was not found."
-        echo
-        echo "Install the OpenSSH client before continuing."
         exit 1
     fi
 
 done
+
+# ============================================================
+# Locate receiver.yaml
+# ============================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RECEIVER_CONFIG="$SCRIPT_DIR/config/receiver.yaml"
+
+echo
+echo "Receiver configuration:"
+echo
+echo "    $RECEIVER_CONFIG"
+echo
+
+if [ ! -f "$RECEIVER_CONFIG" ]; then
+    echo "ERROR: receiver.yaml was not found."
+    echo
+    echo "Expected:"
+    echo "    $RECEIVER_CONFIG"
+    exit 1
+fi
+
+# ============================================================
+# Read station_id from receiver.yaml
+#
+# Expected YAML:
+#
+# station:
+#   station_id: "LFMF-01"
+# ============================================================
+
+STATION_ID=$(python3 - "$RECEIVER_CONFIG" <<'PY'
+import sys
+import yaml
+
+config_file = sys.argv[1]
+
+with open(config_file, "r") as f:
+    config = yaml.safe_load(f) or {}
+
+station = config.get("station", {})
+station_id = station.get("station_id")
+
+if not station_id:
+    print("ERROR: station.station_id not found in receiver.yaml",
+          file=sys.stderr)
+    sys.exit(1)
+
+print(station_id)
+PY
+)
+
+if [ -z "$STATION_ID" ]; then
+    echo "ERROR: station_id is empty."
+    exit 1
+fi
+
+echo "Station ID read from receiver.yaml:"
+echo
+echo "    $STATION_ID"
+echo
 
 # ============================================================
 # LFMF Monitor SSH identity
@@ -107,13 +167,20 @@ VPS_HOST="${VPS_HOST:-169.58.129.177}"
 read -rp "VPS username [jgurubalan]: " VPS_USER
 VPS_USER="${VPS_USER:-jgurubalan}"
 
-DEFAULT_VPS_PATH="~/projects/lfmf_monitoring/data/backups/watchdog"
+# Use an absolute path.
+#
+# This avoids problems with '~' being inside quotes when
+# the path is used by ssh commands.
+DEFAULT_VPS_PATH="/home/${VPS_USER}/projects/lfmf_monitoring/data/backups/watchdog"
 
 read -rp \
     "Remote backup directory [$DEFAULT_VPS_PATH]: " \
     VPS_PATH
 
 VPS_PATH="${VPS_PATH:-$DEFAULT_VPS_PATH}"
+
+# Station-specific directory
+REMOTE_STATION_PATH="$VPS_PATH/$STATION_ID"
 
 # ============================================================
 # Display configuration
@@ -124,6 +191,9 @@ echo "------------------------------------------------------------"
 echo "STEP 3 - Configuration"
 echo "------------------------------------------------------------"
 echo
+echo "Station ID:"
+echo "    $STATION_ID"
+echo
 echo "Pi SSH key:"
 echo "    $KEY_FILE"
 echo
@@ -133,8 +203,11 @@ echo
 echo "VPS:"
 echo "    $VPS_USER@$VPS_HOST"
 echo
-echo "Remote backup directory:"
+echo "Remote backup root:"
 echo "    $VPS_PATH"
+echo
+echo "Station backup directory:"
+echo "    $REMOTE_STATION_PATH"
 echo
 
 read -rp "Is this correct? [y/N]: " CONFIRM
@@ -330,15 +403,16 @@ else
 fi
 
 # ============================================================
-# Create remote backup directory
+# Create remote backup directories
 # ============================================================
 
 echo
 echo "------------------------------------------------------------"
-echo "STEP 9 - Creating VPS backup directory"
+echo "STEP 9 - Creating VPS backup directories"
 echo "------------------------------------------------------------"
 echo
-echo "Creating:"
+
+echo "Backup root:"
 echo
 echo "    $VPS_PATH"
 echo
@@ -346,8 +420,19 @@ echo
 ssh "$SSH_ALIAS" \
     "mkdir -p '$VPS_PATH'"
 
+echo "OK: Backup root created."
+
 echo
-echo "OK: Remote backup directory created."
+echo "Station backup directory:"
+echo
+echo "    $REMOTE_STATION_PATH"
+echo
+
+ssh "$SSH_ALIAS" \
+    "mkdir -p '$REMOTE_STATION_PATH'"
+
+echo
+echo "OK: Station backup directory created."
 
 # ============================================================
 # Test file transfer
@@ -368,11 +453,21 @@ echo "LFMF Monitor VPS backup test" \
     > "$TEST_FILE"
 
 echo
+echo "Local test file:"
+echo
+echo "    $TEST_FILE"
+echo
+
+echo "Remote destination:"
+echo
+echo "    $REMOTE_STATION_PATH/$REMOTE_TEST_FILE"
+echo
+
 echo "Copying test file to VPS..."
 
 scp \
     "$TEST_FILE" \
-    "$SSH_ALIAS:$VPS_PATH/"
+    "$SSH_ALIAS:$REMOTE_STATION_PATH/"
 
 rm -f "$TEST_FILE"
 
@@ -387,7 +482,7 @@ echo
 echo "Verifying test file on VPS..."
 
 if ssh "$SSH_ALIAS" \
-    "test -f '$VPS_PATH/$REMOTE_TEST_FILE'"
+    "test -f '$REMOTE_STATION_PATH/$REMOTE_TEST_FILE'"
 then
 
     echo "OK: VPS received the test file."
@@ -395,6 +490,33 @@ then
 else
 
     echo "ERROR: Test file was not found on VPS."
+    echo
+    echo "Expected location:"
+    echo
+    echo "    $REMOTE_STATION_PATH/$REMOTE_TEST_FILE"
+    exit 1
+fi
+
+# ============================================================
+# Verify file contents
+# ============================================================
+
+echo
+echo "Verifying test file contents..."
+
+REMOTE_CONTENT=$(ssh "$SSH_ALIAS" \
+    "cat '$REMOTE_STATION_PATH/$REMOTE_TEST_FILE'")
+
+if [ "$REMOTE_CONTENT" = "LFMF Monitor VPS backup test" ]; then
+
+    echo "OK: File contents verified."
+
+else
+
+    echo "ERROR: File contents do not match."
+    echo
+    echo "Received:"
+    echo "$REMOTE_CONTENT"
     exit 1
 fi
 
@@ -406,7 +528,7 @@ echo
 echo "Removing temporary test file from VPS..."
 
 ssh "$SSH_ALIAS" \
-    "rm -f '$VPS_PATH/$REMOTE_TEST_FILE'"
+    "rm -f '$REMOTE_STATION_PATH/$REMOTE_TEST_FILE'"
 
 echo "OK: Test file removed."
 
@@ -420,6 +542,9 @@ echo "============================================================"
 echo "       LFMF MONITOR VPS BACKUP SETUP COMPLETE"
 echo "============================================================"
 echo
+echo "Station ID:"
+echo "    $STATION_ID"
+echo
 echo "SSH alias:"
 echo "    $SSH_ALIAS"
 echo
@@ -432,8 +557,22 @@ echo
 echo "VPS:"
 echo "    $VPS_USER@$VPS_HOST"
 echo
-echo "Backup directory:"
+echo "Backup root:"
 echo "    $VPS_PATH"
+echo
+echo "Station backup directory:"
+echo "    $REMOTE_STATION_PATH"
+echo
+echo "------------------------------------------------------------"
+echo "EXPECTED VPS DIRECTORY"
+echo "------------------------------------------------------------"
+echo
+echo "    $VPS_PATH/"
+echo "        $STATION_ID/"
+echo
+echo "For your current receiver.yaml:"
+echo
+echo "    $VPS_PATH/LFMF-01/"
 echo
 echo "------------------------------------------------------------"
 echo "IMPORTANT SECURITY INFORMATION"
