@@ -27,8 +27,7 @@ start_pipeline() {
         echo "Starting LFMF monitoring pipeline..."
 
         PYTHONPATH=src python -m lfmf_monitor.pipeline \
-            > /dev/null \
-            2>> data/logs/pipeline_errors.log &
+            > /dev/null &
 
         PIPELINE_PID=$!
 

@@ -21,6 +21,9 @@ CONFIG_PATH = Path("config/receiver.yaml")
 
 LOG_PATH = Path("data/logs/watchdog.log")
 ERROR_LOG_PATH = Path("data/logs/errors.log")
+PIPELINE_ERROR_LOG_PATH = Path(
+    "data/logs/pipeline_errors.log"
+)
 
 # ---------------------------------------------------------
 # PID files
@@ -37,15 +40,6 @@ PIPELINE_STOP_REQUEST_FILE = Path(
     "data/logs/pipeline_stop_requested"
 )
 
-# ---------------------------------------------------------
-# VPS connection
-# ---------------------------------------------------------
-# Replace these with the actual VPS endpoint used by
-# transport.py.
-
-VPS_HOST = "127.0.0.1"
-VPS_PORT = 5000
-
 
 class Watchdog:
     """Independently monitor the LFMF pipeline and VPS connection."""
@@ -54,6 +48,9 @@ class Watchdog:
         self,
         log_path: Path = LOG_PATH,
         error_log_path: Path = ERROR_LOG_PATH,
+        pipeline_error_log_path: Path = (
+            PIPELINE_ERROR_LOG_PATH
+        ),
         pipeline_pid_file: Path = PIPELINE_PID_FILE,
         watchdog_pid_file: Path = WATCHDOG_PID_FILE,
         pipeline_stop_request_file: Path = (
@@ -62,6 +59,10 @@ class Watchdog:
     ):
         self.log_path = Path(log_path)
         self.error_log_path = Path(error_log_path)
+
+        self.pipeline_error_log_path = Path(
+            pipeline_error_log_path
+        )
 
         self.pipeline_pid_file = Path(
             pipeline_pid_file
@@ -76,10 +77,16 @@ class Watchdog:
         )
 
         # -----------------------------------------------------
-        # Load station ID from receiver.yaml
+        # Load configuration from receiver.yaml
         # -----------------------------------------------------
 
         self.station_id = self._load_station_id()
+
+        (
+            self.vps_host,
+            self.vps_port,
+            self.transport_enabled,
+        ) = self._load_transport_settings()
 
         self.pipeline_running = None
         self.vps_connected = None
@@ -111,6 +118,54 @@ class Watchdog:
         return str(station_id)
 
     # ---------------------------------------------------------
+    # Transport configuration
+    # ---------------------------------------------------------
+
+    @staticmethod
+    def _load_transport_settings():
+        """
+        Load VPS transport settings from receiver.yaml.
+
+        Returns:
+            tuple:
+                host
+                port
+                enabled
+        """
+
+        with CONFIG_PATH.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            config = yaml.safe_load(file) or {}
+
+        transport = config.get("transport", {})
+
+        enabled = transport.get(
+            "enabled",
+            False,
+        )
+
+        host = transport.get("host")
+        port = transport.get("port")
+
+        if enabled and not host:
+            raise ValueError(
+                f"transport.host not found in {CONFIG_PATH}"
+            )
+
+        if enabled and not port:
+            raise ValueError(
+                f"transport.port not found in {CONFIG_PATH}"
+            )
+
+        return (
+            str(host) if host else None,
+            int(port) if port else None,
+            bool(enabled),
+        )
+
+    # ---------------------------------------------------------
     # Initialisation
     # ---------------------------------------------------------
 
@@ -123,6 +178,11 @@ class Watchdog:
         )
 
         self.error_log_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self.pipeline_error_log_path.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
@@ -292,6 +352,20 @@ class Watchdog:
             message,
         )
 
+    def pipeline_error(
+        self,
+        component: str,
+        message: str,
+    ):
+        """Write an error to the pipeline error log."""
+
+        self._write_log(
+            self.pipeline_error_log_path,
+            "ERROR",
+            component,
+            message,
+        )
+
     # ---------------------------------------------------------
     # Pipeline detection
     # ---------------------------------------------------------
@@ -428,6 +502,12 @@ class Watchdog:
                     "running unexpectedly.",
                 )
 
+                self.pipeline_error(
+                    "monitoring",
+                    "Monitoring pipeline crashed "
+                    f"unexpectedly. PID: {pid}.",
+                )
+
             return
 
         # -----------------------------------------------------
@@ -440,8 +520,7 @@ class Watchdog:
     # VPS connection test
     # ---------------------------------------------------------
 
-    @staticmethod
-    def check_vps_connection():
+    def check_vps_connection(self):
         """
         Test whether the VPS TCP endpoint is reachable.
 
@@ -451,8 +530,11 @@ class Watchdog:
             fails.
         """
 
+        if not self.transport_enabled:
+            return False
+
         with socket.create_connection(
-            (VPS_HOST, VPS_PORT),
+            (self.vps_host, self.vps_port),
             timeout=5,
         ):
             return True
@@ -463,6 +545,24 @@ class Watchdog:
 
     def check_vps(self):
         """Check the VPS connection and log state changes."""
+
+        # -----------------------------------------------------
+        # Transport disabled
+        # -----------------------------------------------------
+
+        if not self.transport_enabled:
+
+            if self.vps_connected is not False:
+
+                self.vps_connected = False
+
+                self.info(
+                    "transport",
+                    "VPS transport is disabled "
+                    "in receiver.yaml.",
+                )
+
+            return
 
         try:
 
@@ -477,7 +577,7 @@ class Watchdog:
             self.error(
                 "transport",
                 f"VPS connection refused: "
-                f"{VPS_HOST}:{VPS_PORT}",
+                f"{self.vps_host}:{self.vps_port}",
             )
 
         except TimeoutError:
@@ -487,7 +587,7 @@ class Watchdog:
             self.error(
                 "transport",
                 f"VPS connection timed out: "
-                f"{VPS_HOST}:{VPS_PORT}",
+                f"{self.vps_host}:{self.vps_port}",
             )
 
         except OSError as error:
@@ -512,7 +612,7 @@ class Watchdog:
                 self.info(
                     "transport",
                     f"VPS connection established: "
-                    f"{VPS_HOST}:{VPS_PORT}.",
+                    f"{self.vps_host}:{self.vps_port}.",
                 )
 
             else:
@@ -520,7 +620,7 @@ class Watchdog:
                 self.warning(
                     "transport",
                     f"VPS is not reachable: "
-                    f"{VPS_HOST}:{VPS_PORT}.",
+                    f"{self.vps_host}:{self.vps_port}.",
                 )
 
             return
@@ -536,7 +636,7 @@ class Watchdog:
             self.info(
                 "transport",
                 f"VPS connection restored: "
-                f"{VPS_HOST}:{VPS_PORT}.",
+                f"{self.vps_host}:{self.vps_port}.",
             )
 
             return
@@ -552,7 +652,7 @@ class Watchdog:
             self.alert(
                 "transport",
                 f"VPS connection lost: "
-                f"{VPS_HOST}:{VPS_PORT}.",
+                f"{self.vps_host}:{self.vps_port}.",
             )
 
             return
@@ -610,10 +710,18 @@ class Watchdog:
             f"{self.pipeline_stop_request_file}"
         )
 
-        print(
-            f"VPS: "
-            f"{VPS_HOST}:{VPS_PORT}"
-        )
+        if self.transport_enabled:
+
+            print(
+                f"VPS: "
+                f"{self.vps_host}:{self.vps_port}"
+            )
+
+        else:
+
+            print(
+                "VPS transport: disabled"
+            )
 
         print(
             f"Watchdog log: "
@@ -623,6 +731,11 @@ class Watchdog:
         print(
             f"Error log: "
             f"{self.error_log_path}"
+        )
+
+        print(
+            f"Pipeline error log: "
+            f"{self.pipeline_error_log_path}"
         )
 
         print()

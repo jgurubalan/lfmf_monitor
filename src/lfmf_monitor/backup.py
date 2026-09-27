@@ -59,6 +59,10 @@ class LogBackup:
             self.log_directory / "pipeline_errors.log"
         )
 
+        self.telemetry_log = (
+            Path("data/telemetry/station_telemetry.log")
+        )
+
         self.connection_state = None
 
         self._setup_logging()
@@ -312,8 +316,8 @@ class LogBackup:
 
     def backup(self):
         """
-        Back up watchdog.log, errors.log, and
-        pipeline_errors.log once.
+        Back up watchdog.log, errors.log,
+        pipeline_errors.log, and telemetry.log.
         """
 
         self.logger.info(
@@ -366,6 +370,14 @@ class LogBackup:
         )
 
         # -----------------------------------------------------
+        # Back up telemetry.log
+        # -----------------------------------------------------
+
+        telemetry_success = self._backup_file(
+            self.telemetry_log
+        )
+
+        # -----------------------------------------------------
         # Overall result
         # -----------------------------------------------------
 
@@ -373,6 +385,7 @@ class LogBackup:
             watchdog_success
             or errors_success
             or pipeline_errors_success
+            or telemetry_success
         ):
 
             self.logger.info(
@@ -434,6 +447,11 @@ class LogBackup:
         self.logger.info(
             f"Pipeline errors log: "
             f"{self.pipeline_errors_log}"
+        )
+
+        self.logger.info(
+            f"Telemetry log: "
+            f"{self.telemetry_log}"
         )
 
         try:
