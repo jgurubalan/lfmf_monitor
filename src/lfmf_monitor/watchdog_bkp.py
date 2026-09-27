@@ -4,16 +4,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
-
 
 CHECK_INTERVAL_SECONDS = 5
-
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
-
-CONFIG_PATH = Path("config/receiver.yaml")
 
 # ---------------------------------------------------------
 # Log files
@@ -75,40 +67,10 @@ class Watchdog:
             pipeline_stop_request_file
         )
 
-        # -----------------------------------------------------
-        # Load station ID from receiver.yaml
-        # -----------------------------------------------------
-
-        self.station_id = self._load_station_id()
-
         self.pipeline_running = None
         self.vps_connected = None
 
         self._initialize_directories()
-
-    # ---------------------------------------------------------
-    # Station ID
-    # ---------------------------------------------------------
-
-    @staticmethod
-    def _load_station_id():
-        """Load the station ID from receiver.yaml."""
-
-        with CONFIG_PATH.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-            config = yaml.safe_load(file) or {}
-
-        station = config.get("station", {})
-        station_id = station.get("station_id")
-
-        if not station_id:
-            raise ValueError(
-                f"station_id not found in {CONFIG_PATH}"
-            )
-
-        return str(station_id)
 
     # ---------------------------------------------------------
     # Initialisation
@@ -215,7 +177,7 @@ class Watchdog:
         component: str,
         message: str,
     ):
-        """Write one log entry including the station ID."""
+        """Write one log entry."""
 
         utc_timestamp, local_timestamp = (
             self._timestamps()
@@ -224,7 +186,6 @@ class Watchdog:
         entry = (
             f"{utc_timestamp} UTC | "
             f"{local_timestamp} LOCAL | "
-            f"STATION: {self.station_id} | "
             f"{level} | "
             f"{component} | "
             f"{message}\n"
@@ -583,10 +544,6 @@ class Watchdog:
         print("LFMF watchdog started.")
 
         print(
-            f"Station ID: {self.station_id}"
-        )
-
-        print(
             f"Watchdog PID: {watchdog_pid}"
         )
 
@@ -656,6 +613,12 @@ class Watchdog:
                 f"Watchdog crashed. "
                 f"PID: {watchdog_pid}. "
                 f"Error: {error}",
+            )
+
+            self.alert(
+                "watchdog",
+                "Watchdog stopped because of an "
+                "unexpected error.",
             )
 
             raise

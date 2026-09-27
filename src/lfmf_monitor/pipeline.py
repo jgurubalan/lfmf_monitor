@@ -4,32 +4,20 @@ from lfmf_monitor.receiver import RTLSDR
 from lfmf_monitor.spectrum import compute_spectrum
 from lfmf_monitor.buffer import SignalBuffer
 from lfmf_monitor.transport import Transport
-from lfmf_monitor.watchdog import Watchdog
 
 
 VPS_CHECK_INTERVAL_SECONDS = 60
 
 
 def run():
-    """Run the receiver, spectrum-processing, detection, and transport pipeline."""
-
     receiver = RTLSDR()
     buffer = SignalBuffer()
-
-    watchdog = Watchdog()
-    transport = Transport(
-        watchdog=watchdog,
-    )
+    transport = Transport()
 
     last_vps_check = 0.0
 
     try:
         receiver.start()
-
-        watchdog.info(
-            "pipeline",
-            "Monitoring started.",
-        )
 
         print("Monitoring started.")
         print(
@@ -65,28 +53,49 @@ def run():
         while True:
 
             # -------------------------------------------------
-            # 1. Get one block of IQ samples
+            # Receive one block of IQ samples.
+            #
+            # receiver.py returns:
+            #
+            #   1. UTC timestamp
+            #   2. Local timestamp
+            #   3. IQ samples
             # -------------------------------------------------
 
-            timestamp, samples = receiver.read_samples()
+            utc_timestamp, local_timestamp, samples = (
+                receiver.read_samples()
+            )
 
             # -------------------------------------------------
-            # 2. Calculate the complete spectrum
+            # Process the IQ samples.
             # -------------------------------------------------
 
             result = compute_spectrum(
                 samples=samples,
                 sample_rate_hz=receiver.sample_rate_hz,
                 center_frequency_hz=receiver.center_frequency_hz,
-                timestamp=timestamp,
+                timestamp=utc_timestamp,
             )
 
             # -------------------------------------------------
-            # 3. Display the spectrum measurements
+            # Add both timestamps to the result.
+            # -------------------------------------------------
+
+            result["utc_timestamp"] = (
+                utc_timestamp.isoformat()
+            )
+
+            result["local_timestamp"] = (
+                local_timestamp.isoformat()
+            )
+
+            # -------------------------------------------------
+            # Display spectrum information.
             # -------------------------------------------------
 
             print(
-                f"{result['timestamp'].isoformat()} | "
+                f"UTC: {result['utc_timestamp']} | "
+                f"Local: {result['local_timestamp']} | "
                 f"Peak: "
                 f"{result['peak_frequency_hz'] / 1e6:.6f} MHz | "
                 f"Peak Power: "
@@ -98,29 +107,30 @@ def run():
             )
 
             # -------------------------------------------------
-            # 4. Send spectrum result to buffer
+            # Store only significant signals.
             # -------------------------------------------------
 
             stored = buffer.store(
                 {
-                    "timestamp": result["timestamp"].isoformat(),
-                    "peak_frequency_hz": result[
-                        "peak_frequency_hz"
-                    ],
-                    "peak_power_db": result[
-                        "peak_power_db"
-                    ],
-                    "noise_floor_db": result[
-                        "noise_floor_db"
-                    ],
-                    "snr_db": result[
-                        "signal_above_noise_db"
-                    ],
+                    "timestamp": result["utc_timestamp"],
+                    "local_timestamp": result["local_timestamp"],
+                    "peak_frequency_hz": (
+                        result["peak_frequency_hz"]
+                    ),
+                    "peak_power_db": (
+                        result["peak_power_db"]
+                    ),
+                    "noise_floor_db": (
+                        result["noise_floor_db"]
+                    ),
+                    "snr_db": (
+                        result["signal_above_noise_db"]
+                    ),
                 }
             )
 
             # -------------------------------------------------
-            # 5. Send only significant detections to VPS
+            # Send significant event to VPS.
             # -------------------------------------------------
 
             if stored:
@@ -141,17 +151,15 @@ def run():
                 )
 
             # -------------------------------------------------
-            # 6. Periodically check VPS connection
+            # Periodic VPS health check.
             # -------------------------------------------------
 
             current_time = time.monotonic()
 
             if (
                 transport.enabled
-                and (
-                    current_time - last_vps_check
-                    >= VPS_CHECK_INTERVAL_SECONDS
-                )
+                and current_time - last_vps_check
+                >= VPS_CHECK_INTERVAL_SECONDS
             ):
                 transport.check_connection()
 
@@ -162,12 +170,6 @@ def run():
 
     finally:
         receiver.stop()
-
-        watchdog.info(
-            "pipeline",
-            "Monitoring stopped.",
-        )
-
         print("RTL-SDR stopped.")
 
 

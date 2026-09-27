@@ -4,7 +4,7 @@ import socket
 
 import yaml
 
-from lfmf_monitor.watchdog import Watchdog
+from lfmf_monitor.watchdog_bkp import Watchdog
 
 
 class Transport:

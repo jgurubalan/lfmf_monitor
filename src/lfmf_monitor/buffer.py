@@ -36,16 +36,18 @@ class SignalBuffer:
         self.min_peak_power_db = detection["min_peak_power_db"]
 
     def _initialize_database(self):
-        """Create the SQLite database and detections table."""
+        """Create the SQLite database and ensure the detections table is up to date."""
 
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
         with sqlite3.connect(self.database_path) as connection:
+
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS detections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
+                    local_timestamp TEXT,
                     peak_frequency_hz REAL NOT NULL,
                     peak_power_db REAL NOT NULL,
                     noise_floor_db REAL NOT NULL,
@@ -75,15 +77,17 @@ class SignalBuffer:
                 """
                 INSERT INTO detections (
                     timestamp,
+                    local_timestamp,
                     peak_frequency_hz,
                     peak_power_db,
                     noise_floor_db,
                     snr_db
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result["timestamp"],
+                    result["local_timestamp"],
                     result["peak_frequency_hz"],
                     result["peak_power_db"],
                     result["noise_floor_db"],

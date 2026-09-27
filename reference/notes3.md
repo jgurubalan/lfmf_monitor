@@ -1,0 +1,1 @@
+PYTHONPATH=src python -m lfmf_monitor.pipeline

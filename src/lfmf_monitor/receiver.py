@@ -121,14 +121,18 @@ class RTLSDR:
     def read_samples(
         self,
         num_samples: int | None = None,
-    ) -> tuple[datetime, np.ndarray]:
+    ) -> tuple[datetime, datetime, np.ndarray]:
         """
         Read one block of complex I/Q samples.
 
         Returns:
-            timestamp:
+            utc_timestamp:
                 UTC timestamp representing the beginning of the
-                block read operation.
+                block acquisition.
+
+            local_timestamp:
+                Local timestamp representing the same instant as
+                utc_timestamp.
 
             samples:
                 Complex I/Q samples.
@@ -144,11 +148,16 @@ class RTLSDR:
         if num_samples <= 0:
             raise ValueError("num_samples must be greater than zero")
 
-        # Record the timestamp before reading the block.
+        # Record the UTC timestamp before reading the block.
         #
         # This timestamp represents the beginning of the block
         # acquisition from the Python application's perspective.
-        timestamp = datetime.now(timezone.utc)
+        utc_timestamp = datetime.now(timezone.utc)
+
+        # Convert the SAME instant to local time.
+        #
+        # astimezone() uses the system's configured local timezone.
+        local_timestamp = utc_timestamp.astimezone()
 
         # Each RTL-SDR sample contains:
         #
@@ -180,7 +189,7 @@ class RTLSDR:
         # Combine I and Q into complex samples.
         samples = (i + 1j * q).astype(np.complex64)
 
-        return timestamp, samples
+        return utc_timestamp, local_timestamp, samples
 
     def stop(self) -> None:
         """Stop rtl_sdr and release the RTL-SDR device."""
